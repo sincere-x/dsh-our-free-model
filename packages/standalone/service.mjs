@@ -18,10 +18,19 @@ export function resolveStandaloneDataDir(env = process.env, home = os.homedir())
 
 /** 直接创建核心和 HTTP 服务，不加载插件入口、Cordis 或 DSH 凭据。 */
 export async function startStandalone({
-  dataDir = resolveStandaloneDataDir(), host = '127.0.0.1', port,
+  dataDir = resolveStandaloneDataDir(), host, port,
   logger = console, refresh = true, probe,
 } = {}) {
-  if (!isLoopbackHost(host)) throw new TypeError('the standalone service binds a loopback address only')
+  // 解析监听地址：显式传入用传入值；未传时 127.0.0.1。
+  // 出于"独立产品只监听回环"的设计承诺，非回环地址需要显式 opt-in
+  // （OFM_ALLOW_NON_LOOPBACK=1）才会被接受——Docker / FPK 等容器化场景需要它。
+  const bindHost = typeof host === 'string' && host !== '' ? host : '127.0.0.1'
+  if (!isLoopbackHost(bindHost) && process.env.OFM_ALLOW_NON_LOOPBACK !== '1') {
+    throw new TypeError(
+      'the standalone service binds a loopback address only; ' +
+      'set OFM_ALLOW_NON_LOOPBACK=1 or remove --host to listen on 127.0.0.1'
+    )
+  }
   if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir)) throw new TypeError('dataDir must be an absolute path')
   if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
     throw new TypeError('port must be an integer between 0 and 65535')

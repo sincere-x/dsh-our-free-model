@@ -7,6 +7,7 @@ const usage = `Our Free Model 独立本地服务
 
   --port <端口>       监听端口，默认 18900（冲突时自动选择可用端口）
   --data-dir <目录>   数据目录，默认 OFM_HOME 或 ~/.our-free-model
+  --host <地址>       监听地址，默认 127.0.0.1；非回环需设 OFM_ALLOW_NON_LOOPBACK=1
   --no-refresh        跳过启动与周期刷新；仍可手动刷新和推理
   --probe             启用并保存自动探测设置，会产生上游请求
   --help              显示帮助
@@ -19,13 +20,15 @@ async function main() {
     if (flag === '--help') { process.stdout.write(usage); return }
     if (flag === '--no-refresh') { options.refresh = false; continue }
     if (flag === '--probe') { options.probe = true; continue }
-    if (!['--port', '--data-dir'].includes(flag) || !process.argv[index + 1] || process.argv[index + 1].startsWith('--')) {
+    if (!['--port', '--data-dir', '--host'].includes(flag) || !process.argv[index + 1] || process.argv[index + 1].startsWith('--')) {
       throw new Error(`未知选项或缺少参数：${flag}`)
     }
     const value = process.argv[++index]
     if (flag === '--port') {
       if (!/^\d+$/.test(value) || Number(value) > 65535) throw new Error('端口必须为 0 到 65535 的整数')
       options.port = Number(value)
+    } else if (flag === '--host') {
+      options.host = value
     } else options.dataDir = path.resolve(value)
   }
   const service = await startStandalone(options)

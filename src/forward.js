@@ -159,7 +159,9 @@ export async function resolveLoopbackBind(host) {
   const value = String(host ?? '').trim() || '127.0.0.1'
   const literal = value.replace(/^\[|\]$/g, '')
   if (net.isIP(literal)) {
-    if (!isLoopbackIp(literal)) throw new Error(`the forward listener binds a loopback address only (got ${value})`)
+    if (!isLoopbackIp(literal) && process.env.OFM_ALLOW_NON_LOOPBACK !== '1') {
+      throw new Error(`the forward listener binds a loopback address only (got ${value}); set OFM_ALLOW_NON_LOOPBACK=1 to allow`)
+    }
     return literal
   }
   let addresses
@@ -172,7 +174,7 @@ export async function resolveLoopbackBind(host) {
     throw new Error(`the forward bind host "${value}" resolved to no address`)
   }
   const routable = addresses.find(address => !isLoopbackIp(address.address))
-  if (routable !== undefined) {
+  if (routable !== undefined && process.env.OFM_ALLOW_NON_LOOPBACK !== '1') {
     throw new Error(`the forward listener binds a loopback address only — "${value}" resolves to ${routable.address}`)
   }
   return addresses[0].address

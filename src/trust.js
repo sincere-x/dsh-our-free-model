@@ -20,7 +20,13 @@
  */
 
 /** Hostnames a same-machine caller can legitimately use. */
-const LOOPBACK_NAMES = new Set(['127.0.0.1', '[::1]', '::1', 'localhost'])
+const LOOPBACK_NAMES = new Set([
+  '127.0.0.1', '[::1]', '::1', 'localhost',
+  // 容器化场景下用户常需要从 LAN IP（如 192.168.3.100）访问管理面板。
+  // 通过 OFM_TRUSTED_HOSTS 环境变量 opt-in 添加可信 hostname（逗号分隔）。
+  // 默认空列表，行为与上游一致；opt-in 后受 same-origin 检查约束。
+  ...String(process.env.OFM_TRUSTED_HOSTS ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+])
 
 /**
  * Is this address one a same-machine caller can reach — i.e. may the forward

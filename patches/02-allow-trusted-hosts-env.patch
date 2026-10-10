@@ -1,0 +1,41 @@
+From: docker-fpk-packager <noreply@local>
+Subject: [PATCH] standalone: extend LOOPBACK_NAMES via OFM_TRUSTED_HOSTS env
+
+容器化场景下用户常需要从 LAN IP（如 192.168.3.100）访问管理面板。
+上游默认 LOOPBACK_NAMES = {127.0.0.1, ::1, localhost} —— 仅本机可调管理
+接口 /api/management/*，其他路径 (/v1/*, /, /assets/*) 不受影响。
+
+本 patch 增加一个 opt-in 环境变量 OFM_TRUSTED_HOSTS（逗号分隔的 hostname
+列表），让用户显式声明可信的额外 Host，绕过 trust fence 第一关（"host-not-loopback"）。
+
+后续的 same-origin 检查（sec-fetch-site / Origin / Referer）仍生效——
+即使加白名单，攻击者也得拿到用户浏览器 Origin 才能伪造请求。
+
+典型用法（docker-compose.yml）：
+  environment:
+    - OFM_TRUSTED_HOSTS=192.168.3.100,fn.0602.com.cn
+
+注意 hostname 不要带端口；端口由 Host header 解析，Ofm 在 Origin/Referer 比对
+时单独校验。
+
+---
+diff --git a/src/trust.js b/src/trust.js
+--- a/src/trust.js
++++ b/src/trust.js
+@@ -20,7 +20,13 @@
+  */
+
+ /** Hostnames a same-machine caller can legitimately use. */
+-const LOOPBACK_NAMES = new Set(['127.0.0.1', '[::1]', '::1', 'localhost'])
++const LOOPBACK_NAMES = new Set([
++  '127.0.0.1', '[::1]', '::1', 'localhost',
++  // 容器化场景下用户常需要从 LAN IP（如 192.168.3.100）访问管理面板。
++  // 通过 OFM_TRUSTED_HOSTS 环境变量 opt-in 添加可信 hostname（逗号分隔）。
++  // 默认空列表，行为与上游一致；opt-in 后受 same-origin 检查约束。
++  ...String(process.env.OFM_TRUSTED_HOSTS ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
++])
+
+ /**
+  * Is this address one a same-machine caller can reach — i.e. may the forward
+--
+2.39.0

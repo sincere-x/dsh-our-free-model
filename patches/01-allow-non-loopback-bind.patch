@@ -1,0 +1,85 @@
+diff --git a/packages/standalone/cli.mjs b/packages/standalone/cli.mjs
+old mode 100644
+new mode 100755
+index a7d28e1..de2de9d
+--- a/packages/standalone/cli.mjs
++++ b/packages/standalone/cli.mjs
+@@ -7,6 +7,7 @@ const usage = `Our Free Model 独立本地服务
+ 
+   --port <端口>       监听端口，默认 18900（冲突时自动选择可用端口）
+   --data-dir <目录>   数据目录，默认 OFM_HOME 或 ~/.our-free-model
++  --host <地址>       监听地址，默认 127.0.0.1；非回环需设 OFM_ALLOW_NON_LOOPBACK=1
+   --no-refresh        跳过启动与周期刷新；仍可手动刷新和推理
+   --probe             启用并保存自动探测设置，会产生上游请求
+   --help              显示帮助
+@@ -19,13 +20,15 @@ async function main() {
+     if (flag === '--help') { process.stdout.write(usage); return }
+     if (flag === '--no-refresh') { options.refresh = false; continue }
+     if (flag === '--probe') { options.probe = true; continue }
+-    if (!['--port', '--data-dir'].includes(flag) || !process.argv[index + 1] || process.argv[index + 1].startsWith('--')) {
++    if (!['--port', '--data-dir', '--host'].includes(flag) || !process.argv[index + 1] || process.argv[index + 1].startsWith('--')) {
+       throw new Error(`未知选项或缺少参数：${flag}`)
+     }
+     const value = process.argv[++index]
+     if (flag === '--port') {
+       if (!/^\d+$/.test(value) || Number(value) > 65535) throw new Error('端口必须为 0 到 65535 的整数')
+       options.port = Number(value)
++    } else if (flag === '--host') {
++      options.host = value
+     } else options.dataDir = path.resolve(value)
+   }
+   const service = await startStandalone(options)
+diff --git a/packages/standalone/service.mjs b/packages/standalone/service.mjs
+old mode 100644
+new mode 100755
+index c3c3748..1d2b8f4
+--- a/packages/standalone/service.mjs
++++ b/packages/standalone/service.mjs
+@@ -18,10 +18,19 @@ export function resolveStandaloneDataDir(env = process.env, home = os.homedir())
+ 
+ /** 直接创建核心和 HTTP 服务，不加载插件入口、Cordis 或 DSH 凭据。 */
+ export async function startStandalone({
+-  dataDir = resolveStandaloneDataDir(), host = '127.0.0.1', port,
++  dataDir = resolveStandaloneDataDir(), host, port,
+   logger = console, refresh = true, probe,
+ } = {}) {
+-  if (!isLoopbackHost(host)) throw new TypeError('the standalone service binds a loopback address only')
++  // 解析监听地址：显式传入用传入值；未传时 127.0.0.1。
++  // 出于"独立产品只监听回环"的设计承诺，非回环地址需要显式 opt-in
++  // （OFM_ALLOW_NON_LOOPBACK=1）才会被接受——Docker / FPK 等容器化场景需要它。
++  const bindHost = typeof host === 'string' && host !== '' ? host : '127.0.0.1'
++  if (!isLoopbackHost(bindHost) && process.env.OFM_ALLOW_NON_LOOPBACK !== '1') {
++    throw new TypeError(
++      'the standalone service binds a loopback address only; ' +
++      'set OFM_ALLOW_NON_LOOPBACK=1 or remove --host to listen on 127.0.0.1'
++    )
++  }
+   if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir)) throw new TypeError('dataDir must be an absolute path')
+   if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
+     throw new TypeError('port must be an integer between 0 and 65535')
+diff --git a/src/forward.js b/src/forward.js
+old mode 100644
+new mode 100755
+index 54f58cc..8600419
+--- a/src/forward.js
++++ b/src/forward.js
+@@ -159,7 +159,9 @@ export async function resolveLoopbackBind(host) {
+   const value = String(host ?? '').trim() || '127.0.0.1'
+   const literal = value.replace(/^\[|\]$/g, '')
+   if (net.isIP(literal)) {
+-    if (!isLoopbackIp(literal)) throw new Error(`the forward listener binds a loopback address only (got ${value})`)
++    if (!isLoopbackIp(literal) && process.env.OFM_ALLOW_NON_LOOPBACK !== '1') {
++      throw new Error(`the forward listener binds a loopback address only (got ${value}); set OFM_ALLOW_NON_LOOPBACK=1 to allow`)
++    }
+     return literal
+   }
+   let addresses
+@@ -172,7 +174,7 @@ export async function resolveLoopbackBind(host) {
+     throw new Error(`the forward bind host "${value}" resolved to no address`)
+   }
+   const routable = addresses.find(address => !isLoopbackIp(address.address))
+-  if (routable !== undefined) {
++  if (routable !== undefined && process.env.OFM_ALLOW_NON_LOOPBACK !== '1') {
+     throw new Error(`the forward listener binds a loopback address only — "${value}" resolves to ${routable.address}`)
+   }
+   return addresses[0].address
